@@ -1,0 +1,289 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id        String  @id @default(uuid())
+  name      String // ex: "Lacoste Matriz", "Lacoste Loja Shopping"
+  cnpj      String  @unique // CNPJ único para login
+  subdomain String  @unique // ex: lacoste-matriz.tickets.com
+  domain    String? @unique // domínio personalizado opcional
+  isActive  Boolean @default(true)
+
+  // Hierarquia de franquias
+  type    TenantType @default(FRANCHISE) // FRANCHISOR, FRANCHISE, CROWN
+  brand   String? // ex: "Lacoste", "Nike", "Adidas", "McDonald's", "Drogasil"
+  segment Segment? // ex: MODA, FOOD, FARMA
+
+  // Relacionamento hierárquico
+  parentTenantId String? // ID do franqueador (se for franquia)
+  parentTenant   Tenant?  @relation("TenantHierarchy", fields: [parentTenantId], references: [id])
+  childTenants   Tenant[] @relation("TenantHierarchy")
+
+  // Configurações gerais
+  settings TenantSettings?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relacionamentos
+  users            User[]
+  tickets          Ticket[]
+  ticketCategories TicketCategory[]
+  ticketComments   TicketComment[]
+  logs             Log[]
+
+  @@index([cnpj])
+  @@index([subdomain])
+  @@index([domain])
+  @@index([isActive])
+  @@index([type])
+  @@index([brand])
+  @@index([segment])
+  @@index([parentTenantId])
+}
+
+model TenantSettings {
+  id String @id @default(uuid())
+
+  // Configurações de tickets
+  allowGuestTickets Boolean @default(false) // Permite tickets de não-usuários
+  autoAssignTickets Boolean @default(false) // Auto-atribuição de tickets
+  requireCategory   Boolean @default(true) // Categoria obrigatória
+
+  // Configurações de notificação
+  emailNotifications Boolean @default(true)
+  smsNotifications   Boolean @default(false)
+
+  // Configurações de horário
+  timezone      String @default("America/Sao_Paulo")
+  businessHours Json? // Horário de funcionamento
+
+  // Configurações de SLA
+  defaultSlaHours Int @default(24) // SLA padrão em horas
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relacionamento
+  tenantId String @unique
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id       String  @id @default(uuid())
+  name     String
+  email    String
+  password String
+  role     Role    @default(USER)
+  isActive Boolean @default(true)
+
+  // Avatar personalizado
+  avatarUrl String?
+
+  // Configurações de notificação
+  emailNotifications Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Multi-tenant
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relacionamentos
+  createdTickets  Ticket[]        @relation("TicketCreator")
+  assignedTickets Ticket[]        @relation("TicketAssignee")
+  comments        TicketComment[]
+  logs            Log[]
+
+  @@unique([email, tenantId]) // Email único por tenant
+  @@index([tenantId])
+  @@index([email])
+  @@index([role])
+}
+
+model TicketCategory {
+  id          String  @id @default(uuid())
+  name        String
+  description String?
+  color       String? // Para UI (ex: #FF5722)
+  icon        String? // Ícone da categoria
+  isActive    Boolean @default(true)
+
+  // SLA específico da categoria
+  slaHours Int? // SLA em horas para esta categoria
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Multi-tenant
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  tickets Ticket[]
+
+  @@unique([name, tenantId]) // Nome único por tenant
+  @@index([tenantId])
+  @@index([isActive])
+}
+
+model Ticket {
+  id          String         @id @default(uuid())
+  number      String // Número sequencial do ticket (ex: #001, #002)
+  title       String
+  description String
+  status      TicketStatus   @default(OPEN)
+  priority    TicketPriority @default(MEDIUM)
+
+  // Datas importantes
+  dueDate    DateTime?
+  resolvedAt DateTime?
+  closedAt   DateTime?
+
+  // Informações do solicitante (para tickets de convidados)
+  guestName  String?
+  guestEmail String?
+  guestPhone String?
+
+  // Avaliação do atendimento
+  rating   Int? // 1-5 estrelas
+  feedback String? // Feedback do cliente
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Multi-tenant
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relacionamentos
+  creatorId String?
+  creator   User?   @relation("TicketCreator", fields: [creatorId], references: [id])
+
+  assigneeId String?
+  assignee   User?   @relation("TicketAssignee", fields: [assigneeId], references: [id])
+
+  categoryId String
+  category   TicketCategory @relation(fields: [categoryId], references: [id])
+
+  comments TicketComment[]
+  logs     Log[]
+
+  @@unique([number, tenantId]) // Número único por tenant
+  @@index([tenantId])
+  @@index([status])
+  @@index([priority])
+  @@index([creatorId])
+  @@index([assigneeId])
+  @@index([categoryId])
+  @@index([number])
+}
+
+model TicketComment {
+  id         String  @id @default(uuid())
+  content    String
+  isInternal Boolean @default(false) // true = comentário interno
+
+  // Anexos
+  attachments Json? // URLs de arquivos anexados
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Multi-tenant
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relacionamentos
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id])
+
+  @@index([tenantId])
+  @@index([ticketId])
+  @@index([authorId])
+}
+
+model Log {
+  id       String  @id @default(uuid())
+  action   String // ex: "TICKET_CREATED", "STATUS_CHANGED", "COMMENT_ADDED"
+  entity   String // ex: "TICKET", "USER", "CATEGORY"
+  entityId String // ID da entidade afetada
+  oldValue String? // Valor anterior (para mudanças)
+  newValue String? // Novo valor (para mudanças)
+  message  String // Descrição legível da ação
+
+  // Contexto adicional
+  ipAddress String? // IP de onde veio a ação
+  userAgent String? // User agent do navegador
+
+  createdAt DateTime @default(now())
+
+  // Multi-tenant
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Relacionamentos
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  ticketId String?
+  ticket   Ticket? @relation(fields: [ticketId], references: [id])
+
+  @@index([tenantId])
+  @@index([action])
+  @@index([entity])
+  @@index([entityId])
+  @@index([userId])
+  @@index([ticketId])
+  @@index([createdAt])
+}
+
+enum TenantType {
+  CROWN // Crown - vê tudo sem filtros
+  FRANCHISOR // Franqueador (ex: Lacoste Matriz)
+  FRANCHISE // Franquia (ex: Lacoste Loja Shopping)
+}
+
+enum Segment {
+  MODA // Moda (Lacoste, Nike, Adidas)
+  FOOD // Alimentação (McDonald's, Burger King)
+  FARMA // Farmácia (Drogasil, Raia)
+  TECH // Tecnologia
+  BEAUTY // Beleza
+  SPORT // Esportes
+  OTHER // Outros
+}
+
+enum Role {
+  CROWN_ADMIN // Crown - acesso total sem filtros
+  FRANCHISOR_ADMIN // Franqueador - vê todas as lojas da marca
+  FRANCHISE_ADMIN // Administrador da franquia
+  AGENT // Agente/Técnico que pode atender chamados
+  USER // Usuário comum que pode abrir chamados
+}
+
+enum TicketStatus {
+  OPEN // Aberto
+  IN_PROGRESS // Em andamento
+  WAITING // Aguardando (cliente ou informações)
+  RESOLVED // Resolvido
+  CLOSED // Fechado
+  CANCELLED // Cancelado
+}
+
+enum TicketPriority {
+  LOW // Baixa
+  MEDIUM // Média
+  HIGH // Alta
+  URGENT // Urgente
+  CRITICAL // Crítica
+}

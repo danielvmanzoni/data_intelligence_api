@@ -1,0 +1,96 @@
+services:
+  # Banco de dados PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: tickets-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: tickets
+      POSTGRES_PASSWORD: tickets_secure_pass
+      POSTGRES_DB: tickets_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    networks:
+      - tickets-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tickets"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis para cache e sessões
+  redis:
+    image: redis:7-alpine
+    container_name: tickets-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass redis_secure_pass
+    volumes:
+      - redis_data:/data
+    networks:
+      - tickets-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # API da aplicação
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tickets-api
+    restart: unless-stopped
+    ports:
+      - "3010:3010"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://tickets:tickets_secure_pass@postgres:5432/tickets_db
+      - REDIS_URL=redis://:redis_secure_pass@redis:6379
+      - JWT_SECRET=super_secure_jwt_secret_for_production
+      - API_PORT=3010
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - tickets-network
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx como reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: tickets-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - api
+    networks:
+      - tickets-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  tickets-network:
+    driver: bridge
