@@ -227,6 +227,16 @@ http://localhost:3010/docs
 
 ## 🧪 Testando a API
 
+### 🌐 CORS Configurado
+A API está configurada para aceitar requisições de frontends rodando em:
+- `http://localhost:3000` (React/Next.js)
+- `http://localhost:3001` (React alternativo)
+- `http://localhost:5173` (Vite)
+- `http://localhost:5174` (Vite alternativo)
+- `http://localhost:8080` (Vue.js)
+- `http://localhost:4200` (Angular)
+- `http://127.0.0.1:*` (Localhost alternativo)
+
 ### 1. Verificar Status da API
 ```bash
 curl http://localhost:3010/
@@ -271,6 +281,99 @@ curl -X POST http://localhost:3010/auth/login \
 ```bash
 curl "http://localhost:3010/tenants/cnpj/11.111.111%2F0001-11"
 ```
+
+## 🖥️ Uso no Frontend
+
+### JavaScript/TypeScript
+```javascript
+// Exemplo de login no frontend
+const loginUser = async (cnpj, email, password) => {
+  try {
+    const response = await fetch('http://localhost:3010/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ cnpj, email, password }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Login failed');
+    }
+
+    const data = await response.json();
+    
+    // Salvar token para próximas requisições
+    localStorage.setItem('authToken', data.access_token);
+    localStorage.setItem('user', JSON.stringify(data.user));
+    
+    return data;
+  } catch (error) {
+    console.error('Login error:', error);
+    throw error;
+  }
+};
+
+// Exemplo de requisição autenticada
+const getTenants = async () => {
+  const token = localStorage.getItem('authToken');
+  
+  const response = await fetch('http://localhost:3010/tenants', {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  return response.json();
+};
+```
+
+### React Hook Exemplo
+```jsx
+import { useState, useEffect } from 'react';
+
+function useAuth() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const login = async (cnpj, email, password) => {
+    setLoading(true);
+    try {
+      const response = await fetch('http://localhost:3010/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cnpj, email, password }),
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        setUser(data.user);
+        localStorage.setItem('authToken', data.access_token);
+        return data;
+      } else {
+        throw new Error(data.message);
+      }
+    } catch (error) {
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const logout = () => {
+    setUser(null);
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('user');
+  };
+
+  return { user, login, logout, loading };
+}
+```
+
+### Exemplo Completo
+Veja o arquivo `examples/frontend-usage.js` para exemplos completos com React, Vue.js e JavaScript vanilla.
 
 ### 🔑 Endpoints Principais
 
