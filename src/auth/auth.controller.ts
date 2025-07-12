@@ -6,6 +6,8 @@ import {
   Get,
   UseGuards,
   Request,
+  Param,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -16,17 +18,26 @@ import {
   ApiBody,
   ApiResponse,
   ApiBearerAuth,
+  ApiParam,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { TenantContextGuard } from './tenant-context.guard';
 
 @ApiTags('Auth')
-@Controller('auth')
+@Controller(':tenant/auth')
+@UseGuards(TenantContextGuard)
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('login')
   @ApiOperation({
-    summary: 'Autentica um usuário com CNPJ e retorna o token JWT',
+    summary:
+      'Autentica um usuário no tenant especificado e retorna o token JWT',
+  })
+  @ApiParam({
+    name: 'tenant',
+    description: 'Slug do tenant (subdomain)',
+    example: 'lacoste',
   })
   @ApiBody({ type: LoginDto })
   @ApiResponse({
@@ -43,8 +54,7 @@ export class AuthController {
           tenant: {
             id: 'uuid-do-tenant',
             name: 'Lacoste Loja Shopping',
-            cnpj: '11.111.111/0002-22',
-            subdomain: 'lacoste-loja-shopping',
+            subdomain: 'lacoste',
             type: 'FRANCHISE',
             brand: 'Lacoste',
             segment: 'MODA',
@@ -59,21 +69,41 @@ export class AuthController {
   })
   @ApiResponse({
     status: 401,
-    description: 'CNPJ não encontrado ou credenciais inválidas',
+    description: 'Tenant não encontrado ou credenciais inválidas',
     schema: {
       example: {
         statusCode: 401,
-        message: 'CNPJ não encontrado ou tenant inativo',
+        message: 'Credenciais inválidas',
         error: 'Unauthorized',
       },
     },
   })
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  @ApiResponse({
+    status: 404,
+    description: 'Tenant não encontrado',
+    schema: {
+      example: {
+        statusCode: 404,
+        message: "Tenant 'lacoste' não encontrado ou inativo",
+        error: 'Not Found',
+      },
+    },
+  })
+  login(
+    @Param('tenant') tenantSlug: string,
+    @Body() dto: LoginDto,
+    @Request() req,
+  ) {
+    return this.authService.login(dto, req.tenant);
   }
 
   @Post('register')
-  @ApiOperation({ summary: 'Registra um novo usuário' })
+  @ApiOperation({ summary: 'Registra um novo usuário no tenant especificado' })
+  @ApiParam({
+    name: 'tenant',
+    description: 'Slug do tenant (subdomain)',
+    example: 'lacoste',
+  })
   @ApiBody({ type: CreateUserDto })
   @ApiResponse({
     status: 201,
@@ -88,7 +118,7 @@ export class AuthController {
         tenant: {
           id: 'uuid-do-tenant',
           name: 'Lacoste Loja Shopping',
-          cnpj: '11.111.111/0002-22',
+          subdomain: 'lacoste',
           type: 'FRANCHISE',
           brand: 'Lacoste',
           segment: 'MODA',
@@ -108,14 +138,23 @@ export class AuthController {
       },
     },
   })
-  register(@Body() dto: CreateUserDto) {
-    return this.authService.register(dto);
+  register(
+    @Param('tenant') tenantSlug: string,
+    @Body() dto: CreateUserDto,
+    @Request() req,
+  ) {
+    return this.authService.register({ ...dto, tenantId: req.tenant.id });
   }
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Retorna informações do usuário logado' })
+  @ApiParam({
+    name: 'tenant',
+    description: 'Slug do tenant (subdomain)',
+    example: 'lacoste',
+  })
   @ApiResponse({
     status: 200,
     description: 'Informações do usuário',
@@ -128,7 +167,7 @@ export class AuthController {
         tenant: {
           id: 'uuid-do-tenant',
           name: 'Lacoste Loja Shopping',
-          cnpj: '11.111.111/0002-22',
+          subdomain: 'lacoste',
           type: 'FRANCHISE',
           brand: 'Lacoste',
           segment: 'MODA',
@@ -140,7 +179,12 @@ export class AuthController {
     status: 401,
     description: 'Token inválido ou expirado',
   })
-  async getProfile(@Request() req) {
+  async getProfile(@Param('tenant') tenantSlug: string, @Request() req) {
+    // Verificar se o tenant do JWT corresponde ao tenant da rota
+    if (req.user.tenantSlug !== tenantSlug) {
+      throw new UnauthorizedException('Token não válido para este tenant');
+    }
+
     return this.authService.validateUser(req.user.userId);
   }
 
@@ -150,6 +194,11 @@ export class AuthController {
   @ApiOperation({
     summary: 'Retorna tenants acessíveis pelo usuário baseado em sua role',
   })
+  @ApiParam({
+    name: 'tenant',
+    description: 'Slug do tenant (subdomain)',
+    example: 'lacoste',
+  })
   @ApiResponse({
     status: 200,
     description: 'Lista de tenants acessíveis',
@@ -158,7 +207,7 @@ export class AuthController {
         {
           id: 'uuid-franqueador',
           name: 'Lacoste Matriz',
-          cnpj: '11.111.111/0001-11',
+          subdomain: 'lacoste-matriz',
           type: 'FRANCHISOR',
           brand: 'Lacoste',
           segment: 'MODA',
@@ -177,7 +226,15 @@ export class AuthController {
     status: 401,
     description: 'Token inválido ou expirado',
   })
-  async getAccessibleTenants(@Request() req) {
+  async getAccessibleTenants(
+    @Param('tenant') tenantSlug: string,
+    @Request() req,
+  ) {
+    // Verificar se o tenant do JWT corresponde ao tenant da rota
+    if (req.user.tenantSlug !== tenantSlug) {
+      throw new UnauthorizedException('Token não válido para este tenant');
+    }
+
     return this.authService.getAccessibleTenants(req.user.userId);
   }
 }

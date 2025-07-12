@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TenantService } from '../tenant/tenant.service';
-import { Role, TicketStatus } from '@prisma/client';
+import { Role } from '@prisma/client';
 
 @Injectable()
 export class TicketService {
@@ -81,6 +81,66 @@ export class TicketService {
     });
 
     return ticket;
+  }
+
+  async findByTenant(
+    tenantId: string,
+    userId: string,
+    userRole: Role,
+    userTenantId: string,
+  ) {
+    // Verificar se o usuário tem permissão para ver tickets do tenant
+    const accessibleTenants = await this.tenantService.getAccessibleTenants(
+      userId,
+      userRole,
+      userTenantId,
+    );
+
+    const hasAccess = accessibleTenants.some(
+      (tenant) => tenant.id === tenantId,
+    );
+    if (!hasAccess) {
+      throw new ForbiddenException(
+        'Você não tem permissão para ver tickets deste tenant',
+      );
+    }
+
+    return this.prisma.ticket.findMany({
+      where: { tenantId },
+      include: {
+        creator: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        assignee: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        category: true,
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+            brand: true,
+            type: true,
+          },
+        },
+        _count: {
+          select: {
+            comments: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
   }
 
   async findAll(userId: string, userRole: Role, userTenantId: string) {
@@ -200,72 +260,13 @@ export class TicketService {
     });
   }
 
-  async findByTenant(
-    tenantId: string,
-    userId: string,
-    userRole: Role,
-    userTenantId: string,
-  ) {
-    // Verificar se o usuário tem permissão para ver tickets do tenant
-    const accessibleTenants = await this.tenantService.getAccessibleTenants(
-      userId,
-      userRole,
-      userTenantId,
-    );
-
-    const hasAccess = accessibleTenants.some(
-      (tenant) => tenant.id === tenantId,
-    );
-    if (!hasAccess) {
-      throw new ForbiddenException(
-        'Você não tem permissão para ver tickets deste tenant',
-      );
-    }
-
-    return this.prisma.ticket.findMany({
-      where: { tenantId },
-      include: {
-        creator: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-        assignee: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-        category: true,
-        tenant: {
-          select: {
-            id: true,
-            name: true,
-            brand: true,
-            type: true,
-          },
-        },
-        _count: {
-          select: {
-            comments: true,
-          },
-        },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
-  }
-
   async findOne(
     id: string,
     userId: string,
     userRole: Role,
     userTenantId: string,
   ) {
+    // Primeiro, encontrar o ticket
     const ticket = await this.prisma.ticket.findUnique({
       where: { id },
       include: {
@@ -339,16 +340,17 @@ export class TicketService {
     userRole: Role,
     userTenantId: string,
   ) {
+    // Primeiro, verificar se o ticket existe e se o usuário tem permissão
     const ticket = await this.findOne(id, userId, userRole, userTenantId);
 
-    // Verificar se o usuário pode atualizar este ticket
+    // Verificar se o usuário tem permissão para atualizar
     if (userRole === Role.USER && ticket.creatorId !== userId) {
       throw new ForbiddenException(
-        'Você só pode atualizar seus próprios tickets',
+        'Você só pode atualizar tickets que você criou',
       );
     }
 
-    // Se está atribuindo a alguém, verificar se o assignee pertence ao tenant
+    // Se está sendo atribuído a alguém, verificar se o usuário pertence ao tenant
     if (updateTicketDto.assigneeId) {
       const assignee = await this.prisma.user.findFirst({
         where: {
@@ -358,30 +360,37 @@ export class TicketService {
       });
 
       if (!assignee) {
-        throw new BadRequestException('Usuário não encontrado no tenant');
+        throw new BadRequestException(
+          'Usuário não encontrado ou não pertence ao tenant',
+        );
       }
     }
 
-    // Atualizar datas baseado no status
-    const updateData: any = { ...updateTicketDto };
+    // Se está sendo alterada a categoria, verificar se pertence ao tenant
+    if (updateTicketDto.categoryId) {
+      const category = await this.prisma.ticketCategory.findFirst({
+        where: {
+          id: updateTicketDto.categoryId,
+          tenantId: ticket.tenantId,
+        },
+      });
 
-    if (
-      updateTicketDto.status === TicketStatus.RESOLVED &&
-      ticket.status !== TicketStatus.RESOLVED
-    ) {
-      updateData.resolvedAt = new Date();
+      if (!category) {
+        throw new BadRequestException(
+          'Categoria não encontrada ou não pertence ao tenant',
+        );
+      }
     }
 
-    if (
-      updateTicketDto.status === TicketStatus.CLOSED &&
-      ticket.status !== TicketStatus.CLOSED
-    ) {
-      updateData.closedAt = new Date();
-    }
-
-    return this.prisma.ticket.update({
+    // Atualizar ticket
+    const updatedTicket = await this.prisma.ticket.update({
       where: { id },
-      data: updateData,
+      data: {
+        ...updateTicketDto,
+        resolvedAt:
+          updateTicketDto.status === 'RESOLVED' ? new Date() : undefined,
+        closedAt: updateTicketDto.status === 'CLOSED' ? new Date() : undefined,
+      },
       include: {
         creator: {
           select: {
@@ -408,6 +417,8 @@ export class TicketService {
         },
       },
     });
+
+    return updatedTicket;
   }
 
   async remove(
@@ -416,27 +427,28 @@ export class TicketService {
     userRole: Role,
     userTenantId: string,
   ) {
+    // Primeiro, verificar se o ticket existe e se o usuário tem permissão
     const ticket = await this.findOne(id, userId, userRole, userTenantId);
 
-    // Apenas admins podem remover tickets
-    const adminRoles: Role[] = [
-      Role.CROWN_ADMIN,
-      Role.FRANCHISOR_ADMIN,
-      Role.FRANCHISE_ADMIN,
-    ];
-    if (!adminRoles.includes(userRole)) {
+    // Verificar se o usuário tem permissão para deletar
+    if (
+      userRole === Role.USER ||
+      (userRole === Role.AGENT && ticket.creatorId !== userId)
+    ) {
       throw new ForbiddenException(
-        'Você não tem permissão para remover tickets',
+        'Você não tem permissão para deletar este ticket',
       );
     }
 
-    return this.prisma.ticket.delete({
+    await this.prisma.ticket.delete({
       where: { id },
     });
+
+    return { message: 'Ticket deletado com sucesso' };
   }
 
-  // Métodos específicos para relatórios/BI
   async getTicketStats(userId: string, userRole: Role, userTenantId: string) {
+    // Obter tenants acessíveis pelo usuário
     const accessibleTenants = await this.tenantService.getAccessibleTenants(
       userId,
       userRole,
@@ -445,7 +457,8 @@ export class TicketService {
 
     const tenantIds = accessibleTenants.map((tenant) => tenant.id);
 
-    const stats = await this.prisma.ticket.groupBy({
+    // Contar tickets por status
+    const ticketStats = await this.prisma.ticket.groupBy({
       by: ['status'],
       where: {
         tenantId: {
@@ -453,17 +466,37 @@ export class TicketService {
         },
       },
       _count: {
-        id: true,
+        status: true,
       },
     });
 
-    return stats.reduce(
-      (acc, stat) => {
-        acc[stat.status] = stat._count.id;
-        return acc;
+    // Contar tickets por prioridade
+    const priorityStats = await this.prisma.ticket.groupBy({
+      by: ['priority'],
+      where: {
+        tenantId: {
+          in: tenantIds,
+        },
       },
-      {} as Record<string, number>,
-    );
+      _count: {
+        priority: true,
+      },
+    });
+
+    // Total de tickets
+    const totalTickets = await this.prisma.ticket.count({
+      where: {
+        tenantId: {
+          in: tenantIds,
+        },
+      },
+    });
+
+    return {
+      total: totalTickets,
+      byStatus: ticketStats,
+      byPriority: priorityStats,
+    };
   }
 
   async getTicketsByBrandStats(
@@ -471,14 +504,7 @@ export class TicketService {
     userRole: Role,
     userTenantId: string,
   ) {
-    // Apenas Crown e Franqueadores podem ver stats por marca
-    const allowedRoles: Role[] = [Role.CROWN_ADMIN, Role.FRANCHISOR_ADMIN];
-    if (!allowedRoles.includes(userRole)) {
-      throw new ForbiddenException(
-        'Você não tem permissão para ver estatísticas por marca',
-      );
-    }
-
+    // Obter tenants acessíveis pelo usuário
     const accessibleTenants = await this.tenantService.getAccessibleTenants(
       userId,
       userRole,
@@ -487,7 +513,8 @@ export class TicketService {
 
     const tenantIds = accessibleTenants.map((tenant) => tenant.id);
 
-    const stats = await this.prisma.ticket.groupBy({
+    // Contar tickets por marca
+    const brandStats = await this.prisma.ticket.groupBy({
       by: ['tenantId'],
       where: {
         tenantId: {
@@ -495,15 +522,15 @@ export class TicketService {
         },
       },
       _count: {
-        id: true,
+        tenantId: true,
       },
     });
 
-    // Buscar informações dos tenants para incluir marca
-    const tenants = await this.prisma.tenant.findMany({
+    // Obter informações das marcas
+    const brands = await this.prisma.tenant.findMany({
       where: {
         id: {
-          in: stats.map((s) => s.tenantId),
+          in: tenantIds,
         },
       },
       select: {
@@ -514,9 +541,18 @@ export class TicketService {
       },
     });
 
-    return stats.map((stat) => ({
-      tenant: tenants.find((t) => t.id === stat.tenantId),
-      count: stat._count.id,
-    }));
+    // Combinar estatísticas com informações das marcas
+    const result = brandStats.map((stat) => {
+      const brand = brands.find((b) => b.id === stat.tenantId);
+      return {
+        tenantId: stat.tenantId,
+        tenantName: brand?.name || 'Desconhecido',
+        brand: brand?.brand || 'Desconhecido',
+        type: brand?.type || 'Desconhecido',
+        ticketCount: stat._count.tenantId,
+      };
+    });
+
+    return result;
   }
 }

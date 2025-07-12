@@ -10,7 +10,6 @@ import { JwtService } from '@nestjs/jwt';
 import { LoginDto } from './dto/login.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { TenantService } from '../tenant/tenant.service';
-import { TenantType, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -21,26 +20,14 @@ export class AuthService {
     private readonly tenantService: TenantService,
   ) {}
 
-  async login(dto: LoginDto) {
-    // Primeiro, encontrar o tenant pelo CNPJ
-    const tenant = await this.prisma.tenant.findUnique({
-      where: {
-        cnpj: dto.cnpj,
-        isActive: true,
-      },
-      include: {
-        settings: true,
-        parentTenant: true,
-        childTenants: true,
-      },
-    });
-
+  async login(dto: LoginDto, tenant: any) {
+    // Verificar se o tenant foi passado corretamente
     if (!tenant) {
-      throw new UnauthorizedException('CNPJ não encontrado ou tenant inativo');
+      throw new BadRequestException('Tenant não encontrado');
     }
 
     // Encontrar o usuário no tenant
-    const user = await this.prisma.user.findFirst({
+    const user: any = await (this.prisma as any).user.findFirst({
       where: {
         email: dto.email,
         tenantId: tenant.id,
@@ -64,6 +51,7 @@ export class AuthService {
     const payload = {
       userId: user.id,
       tenantId: user.tenantId,
+      tenantSlug: tenant.subdomain,
       role: user.role,
       email: user.email,
       tenantType: tenant.type,
@@ -83,7 +71,6 @@ export class AuthService {
         tenant: {
           id: user.tenant.id,
           name: user.tenant.name,
-          cnpj: user.tenant.cnpj,
           subdomain: user.tenant.subdomain,
           type: user.tenant.type,
           brand: user.tenant.brand,
@@ -97,9 +84,9 @@ export class AuthService {
 
   async register(dto: CreateUserDto) {
     // Crown Admin pode ser criado sem tenant específico
-    if (dto.role === Role.CROWN_ADMIN) {
+    if (dto.role === ('CROWN_ADMIN' as any)) {
       // Verificar se email já existe
-      const existingUser = await this.prisma.user.findFirst({
+      const existingUser = await (this.prisma as any).user.findFirst({
         where: { email: dto.email },
       });
 
@@ -108,17 +95,17 @@ export class AuthService {
       }
 
       // Criar ou encontrar tenant Crown
-      let crownTenant = await this.prisma.tenant.findFirst({
-        where: { type: TenantType.CROWN },
+      let crownTenant = await (this.prisma as any).tenant.findFirst({
+        where: { type: 'CROWN' },
       });
 
       if (!crownTenant) {
-        crownTenant = await this.prisma.tenant.create({
+        crownTenant = await (this.prisma as any).tenant.create({
           data: {
             name: 'Crown Company',
             cnpj: '00.000.000/0001-00',
             subdomain: 'crown',
-            type: TenantType.CROWN,
+            type: 'CROWN',
             settings: {
               create: {},
             },
@@ -129,7 +116,7 @@ export class AuthService {
       // Hash da senha
       const hashedPassword = await bcrypt.hash(dto.password, 10);
 
-      const user = await this.prisma.user.create({
+      const user = await (this.prisma as any).user.create({
         data: {
           name: dto.name,
           email: dto.email,
@@ -159,7 +146,7 @@ export class AuthService {
     }
 
     // Verificar se email já existe no tenant
-    const existingUser = await this.prisma.user.findFirst({
+    const existingUser = await (this.prisma as any).user.findFirst({
       where: {
         email: dto.email,
         tenantId: dto.tenantId,
@@ -174,19 +161,19 @@ export class AuthService {
     const tenant = await this.tenantService.findOne(dto.tenantId);
 
     // Validar role baseado no tipo de tenant
-    const roleToValidate = dto.role || Role.USER;
+    const roleToValidate = dto.role || ('USER' as any);
     this.validateRoleForTenant(roleToValidate, tenant.type);
 
     // Hash da senha
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     // Criar usuário
-    const user = await this.prisma.user.create({
+    const user = await (this.prisma as any).user.create({
       data: {
         name: dto.name,
         email: dto.email,
         password: hashedPassword,
-        role: dto.role || Role.USER,
+        role: dto.role || 'USER',
         tenantId: dto.tenantId,
       },
       include: {
@@ -205,38 +192,26 @@ export class AuthService {
     return userWithoutPassword;
   }
 
-  private validateRoleForTenant(role: Role, tenantType: TenantType) {
+  private validateRoleForTenant(role: any, tenantType: any) {
     switch (tenantType) {
-      case TenantType.CROWN:
-        if (role !== Role.CROWN_ADMIN) {
+      case 'CROWN':
+        if (role !== 'CROWN_ADMIN') {
           throw new BadRequestException(
             'Apenas CROWN_ADMIN pode ser criado em tenant Crown',
           );
         }
         break;
 
-      case TenantType.FRANCHISOR:
-        if (
-          ![
-            Role.FRANCHISOR_ADMIN as Role,
-            Role.AGENT as Role,
-            Role.USER as Role,
-          ].includes(role)
-        ) {
+      case 'FRANCHISOR':
+        if (!['FRANCHISOR_ADMIN', 'AGENT', 'USER'].includes(role)) {
           throw new BadRequestException(
             'Roles permitidos para franqueador: FRANCHISOR_ADMIN, AGENT, USER',
           );
         }
         break;
 
-      case TenantType.FRANCHISE:
-        if (
-          ![
-            Role.FRANCHISE_ADMIN as Role,
-            Role.AGENT as Role,
-            Role.USER as Role,
-          ].includes(role)
-        ) {
+      case 'FRANCHISE':
+        if (!['FRANCHISE_ADMIN', 'AGENT', 'USER'].includes(role)) {
           throw new BadRequestException(
             'Roles permitidos para franquia: FRANCHISE_ADMIN, AGENT, USER',
           );
@@ -249,7 +224,23 @@ export class AuthService {
   }
 
   async validateUser(userId: string) {
-    const user = await this.prisma.user.findUnique({
+    const user = await (this.prisma as any).user.findUnique({
+      where: { id: userId },
+      include: {
+        tenant: true,
+      },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Usuário não encontrado');
+    }
+
+    const { password, ...userWithoutPassword } = user;
+    return userWithoutPassword;
+  }
+
+  async getAccessibleTenants(userId: string) {
+    const user = await (this.prisma as any).user.findUnique({
       where: { id: userId },
       include: {
         tenant: {
@@ -261,20 +252,49 @@ export class AuthService {
       },
     });
 
-    if (!user || !user.isActive) {
-      throw new UnauthorizedException('Usuário inválido ou inativo');
+    if (!user) {
+      throw new UnauthorizedException('Usuário não encontrado');
     }
 
-    return user;
-  }
+    let accessibleTenants: any[] = [];
 
-  async getAccessibleTenants(userId: string) {
-    const user = await this.validateUser(userId);
+    switch (user.role) {
+      case 'CROWN_ADMIN':
+        // Crown Admin vê todos os tenants
+        accessibleTenants = await (this.prisma as any).tenant.findMany({
+          where: { isActive: true },
+          include: {
+            parentTenant: true,
+            childTenants: true,
+          },
+        });
+        break;
 
-    return this.tenantService.getAccessibleTenants(
-      userId,
-      user.role,
-      user.tenantId,
-    );
+      case 'FRANCHISOR_ADMIN':
+        // Franqueador vê o próprio tenant e todos os filhos
+        accessibleTenants = await (this.prisma as any).tenant.findMany({
+          where: {
+            OR: [{ id: user.tenantId }, { parentTenantId: user.tenantId }],
+            isActive: true,
+          },
+          include: {
+            parentTenant: true,
+            childTenants: true,
+          },
+        });
+        break;
+
+      case 'FRANCHISE_ADMIN':
+      case 'AGENT':
+      case 'USER':
+        // Outros roles veem apenas o próprio tenant
+        accessibleTenants = [user.tenant];
+        break;
+
+      default:
+        throw new UnauthorizedException('Role não reconhecida');
+    }
+
+    return accessibleTenants;
   }
 }
