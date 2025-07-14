@@ -4,6 +4,6 @@ import { TicketCommentController } from './ticket-comment.controller';
 
 @Module({
   providers: [TicketCommentService],
-  controllers: [TicketCommentController]
+  controllers: [TicketCommentController],
 })
 export class TicketCommentModule {}

@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, TicketStatus, TicketPriority } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -22,17 +22,20 @@ async function main() {
       isActive: true,
       settings: {
         create: {
-          primaryColor: '#1976D2',
-          secondaryColor: '#424242',
-          logo: 'https://placehold.co/200x100/1976D2/FFF.png?text=Crown',
-          favicon: 'https://placehold.co/32x32/1976D2/FFF.png?text=C',
+          allowGuestTickets: true,
+          autoAssignTickets: true,
+          requireCategory: true,
+          emailNotifications: true,
+          smsNotifications: false,
+          timezone: 'America/Sao_Paulo',
+          defaultSlaHours: 24,
         },
       },
     },
   });
 
   // Criar admin do Crown
-  const crownAdmin = await prisma.user.create({
+  await prisma.user.create({
     data: {
       name: 'Admin Crown',
       email: 'admin@crown.com',
@@ -55,17 +58,20 @@ async function main() {
       isActive: true,
       settings: {
         create: {
-          primaryColor: '#27ae60',
-          secondaryColor: '#2c3e50',
-          logo: 'https://placehold.co/200x100/27ae60/FFF.png?text=Lacoste',
-          favicon: 'https://placehold.co/32x32/27ae60/FFF.png?text=L',
+          allowGuestTickets: true,
+          autoAssignTickets: true,
+          requireCategory: true,
+          emailNotifications: true,
+          smsNotifications: false,
+          timezone: 'America/Sao_Paulo',
+          defaultSlaHours: 24,
         },
       },
     },
   });
 
   // Criar admin do Franqueador
-  const lacosteAdmin = await prisma.user.create({
+  await prisma.user.create({
     data: {
       name: 'Admin Lacoste',
       email: 'admin@lacoste.com',
@@ -112,10 +118,13 @@ async function main() {
       parentTenantId: lacosteTenant.id,
       settings: {
         create: {
-          primaryColor: '#27ae60',
-          secondaryColor: '#2c3e50',
-          logo: 'https://placehold.co/200x100/27ae60/FFF.png?text=Lacoste+Ibirapuera',
-          favicon: 'https://placehold.co/32x32/27ae60/FFF.png?text=LI',
+          allowGuestTickets: true,
+          autoAssignTickets: true,
+          requireCategory: true,
+          emailNotifications: true,
+          smsNotifications: false,
+          timezone: 'America/Sao_Paulo',
+          defaultSlaHours: 24,
         },
       },
     },
@@ -174,10 +183,11 @@ async function main() {
   const tickets = await Promise.all([
     prisma.ticket.create({
       data: {
+        number: 'TICKET-001',
         title: 'Problema com PDV',
         description: 'Sistema travando durante fechamento de vendas',
-        status: 'OPEN',
-        priority: 'HIGH',
+        status: TicketStatus.OPEN,
+        priority: TicketPriority.HIGH,
         dueDate: new Date(Date.now() + 24 * 60 * 60 * 1000), // +24h
         guestName: 'Carlos Vendedor',
         guestEmail: 'carlos@lacoste-ibirapuera.com',
@@ -190,11 +200,12 @@ async function main() {
     }),
     prisma.ticket.create({
       data: {
+        number: 'TICKET-002',
         title: 'Dúvida sobre desconto',
         description:
           'Cliente perguntando sobre política de desconto para compras acima de R$ 1000',
-        status: 'IN_PROGRESS',
-        priority: 'MEDIUM',
+        status: TicketStatus.IN_PROGRESS,
+        priority: TicketPriority.MEDIUM,
         dueDate: new Date(Date.now() + 4 * 60 * 60 * 1000), // +4h
         guestName: 'Ana Vendedora',
         guestEmail: 'ana@lacoste-ibirapuera.com',
@@ -207,10 +218,11 @@ async function main() {
     }),
     prisma.ticket.create({
       data: {
+        number: 'TICKET-003',
         title: 'Erro na conciliação',
         description: 'Divergência nos valores do fechamento do dia',
-        status: 'PENDING',
-        priority: 'LOW',
+        status: TicketStatus.WAITING,
+        priority: TicketPriority.LOW,
         dueDate: new Date(Date.now() + 48 * 60 * 60 * 1000), // +48h
         guestName: 'Paulo Financeiro',
         guestEmail: 'paulo@lacoste-ibirapuera.com',
@@ -228,7 +240,8 @@ async function main() {
       data: {
         content: 'Iniciando análise do problema no PDV',
         ticketId: tickets[0].id,
-        userId: lacosteAgent1.id,
+        authorId: lacosteAgent1.id,
+        tenantId: lacosteFranchise.id,
       },
     }),
     prisma.ticketComment.create({
@@ -236,7 +249,8 @@ async function main() {
         content:
           'Verificando com o setor comercial sobre a política de descontos',
         ticketId: tickets[1].id,
-        userId: lacosteAgent2.id,
+        authorId: lacosteAgent2.id,
+        tenantId: lacosteFranchise.id,
       },
     }),
   ]);
@@ -263,6 +277,6 @@ main()
     console.error('❌ Erro ao executar seed:', e);
     process.exit(1);
   })
-  .finally(async () => {
-    await prisma.$disconnect();
+  .finally(() => {
+    void prisma.$disconnect();
   });
