@@ -1,5 +1,5 @@
 # Multi-stage build para otimização
-FROM node:20-alpine AS base
+FROM --platform=linux/amd64 node:20-alpine AS base
 
 # Instalar dependências do sistema necessárias
 RUN apk add --no-cache libc6-compat
@@ -18,31 +18,31 @@ FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Gerar Prisma Client
+# Gerar Prisma Client primeiro
 RUN npx prisma generate
 
 # Build da aplicação
 RUN pnpm run build
 
 # Estágio de produção
-FROM node:20-alpine AS runner
+FROM --platform=linux/amd64 node:20-alpine AS runner
 WORKDIR /app
 
 # Criar usuário não-root
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nestjs
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nestjs
 
-# Instalar apenas dependências de produção
+# Copiar arquivos necessários
 COPY package*.json pnpm-lock.yaml ./
-RUN npm install -g pnpm && pnpm install --frozen-lockfile --prod
-
-# Copiar arquivos buildados e necessários
-COPY --from=builder --chown=nestjs:nodejs /app/dist ./dist
-COPY --from=builder --chown=nestjs:nodejs /app/prisma ./prisma
-COPY --from=builder --chown=nestjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/node_modules ./node_modules
 
 # Criar diretório de logs
 RUN mkdir -p logs && chown nestjs:nodejs logs
+
+# Ajustar permissões
+RUN chown -R nestjs:nodejs .
 
 USER nestjs
 

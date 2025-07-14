@@ -43,35 +43,57 @@ async function bootstrap() {
   const config = new DocumentBuilder()
     .setTitle('API de Gestão de Chamados')
     .setDescription(
-      'API multi-tenant para gerenciamento de tickets/chamados de suporte com identidade visual personalizada',
+      'API multi-tenant para gerenciamento de tickets/chamados de suporte com identidade visual personalizada.\n\n' +
+        '## Autenticação\n\n' +
+        '1. Faça login usando o endpoint `/auth/login` para obter o token JWT\n' +
+        '2. Clique no botão "Authorize" (🔓) no topo da página\n' +
+        '3. Cole APENAS o token JWT (sem a palavra "Bearer")\n' +
+        '4. Clique em "Authorize" e depois em "Close"\n\n' +
+        '## Tenants\n\n' +
+        'Todas as rotas que começam com `/:tenant` precisam do slug do tenant na URL.\n' +
+        'Exemplo: Para o tenant "crown", use `/crown/tickets`',
     )
     .setVersion('1.0')
-    .addBearerAuth({
-      type: 'http',
-      scheme: 'bearer',
-      bearerFormat: 'JWT',
-      description: 'Insira o token JWT no formato: Bearer <token>',
-    })
-    .addApiKey(
-      {
-        type: 'apiKey',
-        name: 'X-Tenant-Context',
-        in: 'header',
-        description: 'Identificador do tenant (subdomínio ou ID)',
-      },
-      'tenant-header',
-    )
+    .addSecurityRequirements('bearer')
+    .addBearerAuth()
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document);
+
+  SwaggerModule.setup('docs', app, document, {
+    swaggerOptions: {
+      persistAuthorization: true,
+      docExpansion: 'list',
+      filter: true,
+      tryItOutEnabled: true,
+      displayRequestDuration: true,
+      syntaxHighlight: {
+        theme: 'monokai',
+      },
+      defaultModelsExpandDepth: 3,
+      defaultModelExpandDepth: 3,
+      operationsSorter: 'alpha',
+      tagsSorter: 'alpha',
+    },
+    customSiteTitle: 'API de Gestão de Chamados - Documentação',
+    customfavIcon: 'https://fastapi.tiangolo.com/img/favicon.png',
+    customJs: [
+      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui-bundle.min.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui-standalone-preset.min.js',
+    ],
+    customCssUrl: [
+      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui.min.css',
+      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui-standalone-preset.min.css',
+      'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/4.15.5/swagger-ui.css',
+    ],
+  });
 
   app.useGlobalPipes(new ValidationPipe());
 
   const logService = app.get(LogService);
-
   app.useGlobalInterceptors(new LogInterceptor(logService));
 
   await app.listen(3010);
 }
+
 bootstrap();

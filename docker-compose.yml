@@ -17,9 +17,10 @@ services:
       - tickets-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tickets"]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 5
+      start_period: 10s
 
   # Redis para cache e sessões
   redis:
@@ -35,9 +36,10 @@ services:
       - tickets-network
     healthcheck:
       test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 5
+      start_period: 10s
 
   # API da aplicação
   api:
@@ -63,11 +65,17 @@ services:
       - tickets-network
     volumes:
       - ./logs:/app/logs
+    command: >
+      sh -c "
+        npx prisma migrate deploy &&
+        node dist/main
+      "
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3010/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 15s
 
   # Nginx como reverse proxy
   nginx:

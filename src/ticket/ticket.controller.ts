@@ -26,7 +26,7 @@ import {
 
 @ApiTags('Tickets')
 @Controller(':tenant/tickets')
-@UseGuards(TenantContextGuard, JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantContextGuard)
 @ApiBearerAuth()
 export class TicketController {
   constructor(private readonly ticketService: TicketService) {}
@@ -66,13 +66,121 @@ export class TicketController {
   }
 
   @Get('stats')
-  @ApiOperation({ summary: 'Obter estatísticas de tickets do tenant' })
+  @ApiOperation({
+    summary: 'Obter estatísticas detalhadas de tickets do tenant',
+    description: `Retorna insights detalhados sobre os tickets, incluindo:
+    - Total de tickets
+    - Distribuição por status (aberto, em andamento, resolvido, etc.)
+    - Distribuição por prioridade
+    - Distribuição por categoria
+    - Distribuição por agente responsável
+    - Tickets sem agente atribuído
+    - Tickets vencidos
+    - Tickets próximos do vencimento (24h)
+    - Tempo médio de resolução`,
+  })
   @ApiParam({
     name: 'tenant',
     description: 'Slug do tenant',
     example: 'lacoste',
   })
-  @ApiResponse({ status: 200, description: 'Estatísticas dos tickets' })
+  @ApiResponse({
+    status: 200,
+    description: 'Estatísticas dos tickets',
+    schema: {
+      type: 'object',
+      properties: {
+        total: {
+          type: 'number',
+          description: 'Total de tickets',
+          example: 150,
+        },
+        byStatus: {
+          type: 'array',
+          description: 'Distribuição de tickets por status',
+          items: {
+            type: 'object',
+            properties: {
+              status: { type: 'string', example: 'OPEN' },
+              count: { type: 'number', example: 45 },
+              percentage: { type: 'string', example: '30.0%' },
+            },
+          },
+        },
+        byPriority: {
+          type: 'array',
+          description: 'Distribuição de tickets por prioridade',
+          items: {
+            type: 'object',
+            properties: {
+              priority: { type: 'string', example: 'HIGH' },
+              count: { type: 'number', example: 25 },
+              percentage: { type: 'string', example: '16.7%' },
+            },
+          },
+        },
+        byCategory: {
+          type: 'array',
+          description: 'Distribuição de tickets por categoria',
+          items: {
+            type: 'object',
+            properties: {
+              categoryId: { type: 'string', example: 'uuid' },
+              categoryName: { type: 'string', example: 'Suporte Técnico' },
+              count: { type: 'number', example: 30 },
+              percentage: { type: 'string', example: '20.0%' },
+            },
+          },
+        },
+        byAssignee: {
+          type: 'array',
+          description: 'Distribuição de tickets por agente responsável',
+          items: {
+            type: 'object',
+            properties: {
+              assigneeId: { type: 'string', example: 'uuid' },
+              assigneeName: { type: 'string', example: 'João Silva' },
+              count: { type: 'number', example: 20 },
+              percentage: { type: 'string', example: '13.3%' },
+            },
+          },
+        },
+        unassigned: {
+          type: 'object',
+          description: 'Tickets sem agente atribuído',
+          properties: {
+            count: { type: 'number', example: 15 },
+            percentage: { type: 'string', example: '10.0%' },
+          },
+        },
+        overdue: {
+          type: 'object',
+          description: 'Tickets vencidos',
+          properties: {
+            count: { type: 'number', example: 5 },
+            percentage: { type: 'string', example: '3.3%' },
+          },
+        },
+        dueSoon: {
+          type: 'object',
+          description: 'Tickets próximos do vencimento (24h)',
+          properties: {
+            count: { type: 'number', example: 8 },
+            percentage: { type: 'string', example: '5.3%' },
+          },
+        },
+        averageResolutionTime: {
+          type: 'object',
+          description: 'Tempo médio de resolução',
+          properties: {
+            milliseconds: { type: 'number', example: 172800000 },
+            hours: { type: 'number', example: 48.0 },
+            days: { type: 'number', example: 2.0 },
+          },
+        },
+      },
+    },
+  })
   getStats(@Param('tenant') tenantSlug: string, @Request() req) {
     return this.ticketService.getTicketStats(
       req.user.userId,

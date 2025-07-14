@@ -1,24 +1,22 @@
 // src/auth/decorators/current-tenant.decorator.ts
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
-import { JwtPayload } from '../interfaces/jwt-payload.interface';
+import { Request } from 'express';
 
-export const CurrentTenant = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): string => {
-    const request = ctx.switchToHttp().getRequest<{ user: JwtPayload }>();
-    return request.user.tenantId;
-  },
-);
+interface RequestWithTenant extends Request {
+  tenant: {
+    id: string;
+    name: string;
+    subdomain: string;
+    type: string;
+    brand: string | null;
+    segment: string | null;
+    isActive: boolean;
+  };
+}
 
-export const CurrentUser = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): JwtPayload => {
-    const request = ctx.switchToHttp().getRequest<{ user: JwtPayload }>();
-    return request.user;
-  },
-);
-
-export const CurrentTenantSlug = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): string => {
-    const request = ctx.switchToHttp().getRequest<{ user: JwtPayload }>();
-    return request.user.tenantSlug;
+export const CurrentStore = createParamDecorator(
+  (data: unknown, ctx: ExecutionContext): string => {
+    const request = ctx.switchToHttp().getRequest<RequestWithTenant>();
+    return request.tenant.id;
   },
 );

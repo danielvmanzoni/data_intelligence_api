@@ -60,6 +60,14 @@ https://api.example.com/
 - **Excluir**: `DELETE /:tenant/tickets/:id`
 - **Estatísticas**: `GET /:tenant/tickets/stats`
 
+#### 4. **Operações com Categorias de Tickets**
+- **Criar**: `POST /:tenant/ticket-category`
+- **Listar Todas**: `GET /:tenant/ticket-category`
+- **Listar Ativas**: `GET /:tenant/ticket-category/active`
+- **Visualizar**: `GET /:tenant/ticket-category/:id`
+- **Atualizar**: `PATCH /:tenant/ticket-category/:id`
+- **Excluir**: `DELETE /:tenant/ticket-category/:id`
+
 ### 🔐 Segurança e Isolamento
 
 #### **Guard Global TenantContextGuard**
@@ -107,6 +115,25 @@ curl -X POST "http://localhost:3010/nike/tickets" \
   }'
 ```
 
+#### **4. Gerenciar Categorias de Tickets**
+```bash
+# Criar categoria
+curl -X POST "http://localhost:3010/nike/ticket-category" \
+  -H "Authorization: Bearer SEU_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Suporte Técnico",
+    "description": "Problemas técnicos e suporte ao sistema",
+    "color": "#FF5722",
+    "icon": "support",
+    "slaHours": 24
+  }'
+
+# Listar categorias ativas
+curl -X GET "http://localhost:3010/nike/ticket-category/active" \
+  -H "Authorization: Bearer SEU_JWT_TOKEN"
+```
+
 ## 🔧 Componentes Principais
 
 ### **TenantContextGuard**
@@ -125,10 +152,58 @@ curl -X POST "http://localhost:3010/nike/tickets" \
 - Operações CRUD isoladas por tenant
 - Filtros automáticos por tenant
 
+### **TicketCategoryController**
+- Rota: `/:tenant/ticket-category/*`
+- Gerenciamento de categorias de tickets
+- Validações de nome único por tenant
+- Soft delete para categorias em uso
+- Personalização com cores e ícones
+- SLA configurável por categoria
+
 ### **JWT Strategy**
 - Validação de tokens JWT
 - Verificação de correspondência com tenant
 - Controle de acesso contextual
+
+## 📊 Modelo de Dados
+
+### Tickets
+
+O sistema permite a organização dos tickets em categorias personalizáveis por tenant, com as seguintes características:
+
+#### Campos
+- **name**: Nome único da categoria (por tenant)
+- **description**: Descrição detalhada (opcional)
+- **color**: Cor em formato hexadecimal para UI (opcional)
+- **icon**: Nome do ícone para UI (opcional)
+- **isActive**: Status de ativação da categoria
+- **slaHours**: Tempo de SLA em horas (1-720h, opcional)
+
+#### Validações
+- Nome único por tenant
+- Cor em formato hexadecimal válido (ex: #FF5722)
+- SLA entre 1 e 720 horas (30 dias)
+- Soft delete para categorias com tickets associados
+
+#### Relacionamentos
+- Pertence a um Tenant específico
+- Pode ter múltiplos Tickets associados
+
+#### Exemplo de Categoria
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "Suporte Técnico",
+  "description": "Tickets relacionados a problemas técnicos",
+  "color": "#FF5722",
+  "icon": "support",
+  "slaHours": 24,
+  "isActive": true,
+  "tenantId": "tenant-uuid",
+  "createdAt": "2024-01-01T00:00:00.000Z",
+  "updatedAt": "2024-01-01T00:00:00.000Z"
+}
+```
 
 ## 🛠️ Tecnologias Utilizadas
 

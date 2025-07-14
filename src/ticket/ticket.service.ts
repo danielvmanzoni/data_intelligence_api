@@ -456,6 +456,9 @@ export class TicketService {
     );
 
     const tenantIds = accessibleTenants.map((tenant) => tenant.id);
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
     // Contar tickets por status
     const ticketStats = await this.prisma.ticket.groupBy({
@@ -483,6 +486,133 @@ export class TicketService {
       },
     });
 
+    // Contar tickets por categoria
+    const categoryStats = await this.prisma.ticket.groupBy({
+      by: ['categoryId'],
+      where: {
+        tenantId: {
+          in: tenantIds,
+        },
+      },
+      _count: {
+        categoryId: true,
+      },
+    });
+
+    // Buscar nomes das categorias
+    const categories = await this.prisma.ticketCategory.findMany({
+      where: {
+        id: {
+          in: categoryStats.map((stat) => stat.categoryId),
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    // Contar tickets por agente
+    const assigneeStats = await this.prisma.ticket.groupBy({
+      by: ['assigneeId'],
+      where: {
+        tenantId: {
+          in: tenantIds,
+        },
+        assigneeId: {
+          not: null,
+        },
+      },
+      _count: {
+        assigneeId: true,
+      },
+    });
+
+    // Buscar nomes dos agentes
+    const assignees = await this.prisma.user.findMany({
+      where: {
+        id: {
+          in: assigneeStats
+            .map((stat) => stat.assigneeId)
+            .filter(Boolean) as string[],
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    // Tickets sem agente atribuído
+    const unassignedCount = await this.prisma.ticket.count({
+      where: {
+        tenantId: {
+          in: tenantIds,
+        },
+        assigneeId: null,
+        status: {
+          notIn: ['RESOLVED', 'CLOSED', 'CANCELLED'],
+        },
+      },
+    });
+
+    // Tickets vencidos
+    const overdueCount = await this.prisma.ticket.count({
+      where: {
+        tenantId: {
+          in: tenantIds,
+        },
+        dueDate: {
+          lt: now,
+        },
+        status: {
+          notIn: ['RESOLVED', 'CLOSED', 'CANCELLED'],
+        },
+      },
+    });
+
+    // Tickets próximos do vencimento (24h)
+    const dueSoonCount = await this.prisma.ticket.count({
+      where: {
+        tenantId: {
+          in: tenantIds,
+        },
+        dueDate: {
+          gte: now,
+          lt: tomorrow,
+        },
+        status: {
+          notIn: ['RESOLVED', 'CLOSED', 'CANCELLED'],
+        },
+      },
+    });
+
+    // Calcular tempo médio de resolução
+    const resolvedTickets = await this.prisma.ticket.findMany({
+      where: {
+        tenantId: {
+          in: tenantIds,
+        },
+        status: 'RESOLVED',
+        resolvedAt: {
+          not: null,
+        },
+      },
+      select: {
+        createdAt: true,
+        resolvedAt: true,
+      },
+    });
+
+    const avgResolutionTime =
+      resolvedTickets.length > 0
+        ? resolvedTickets.reduce((acc, ticket) => {
+            const resolutionTime =
+              ticket.resolvedAt!.getTime() - ticket.createdAt.getTime();
+            return acc + resolutionTime;
+          }, 0) / resolvedTickets.length
+        : 0;
+
     // Total de tickets
     const totalTickets = await this.prisma.ticket.count({
       where: {
@@ -494,8 +624,53 @@ export class TicketService {
 
     return {
       total: totalTickets,
-      byStatus: ticketStats,
-      byPriority: priorityStats,
+      byStatus: ticketStats.map((stat) => ({
+        status: stat.status,
+        count: stat._count.status,
+        percentage:
+          ((stat._count.status / totalTickets) * 100).toFixed(1) + '%',
+      })),
+      byPriority: priorityStats.map((stat) => ({
+        priority: stat.priority,
+        count: stat._count.priority,
+        percentage:
+          ((stat._count.priority / totalTickets) * 100).toFixed(1) + '%',
+      })),
+      byCategory: categoryStats.map((stat) => ({
+        categoryId: stat.categoryId,
+        categoryName:
+          categories.find((c) => c.id === stat.categoryId)?.name ||
+          'Desconhecida',
+        count: stat._count.categoryId,
+        percentage:
+          ((stat._count.categoryId / totalTickets) * 100).toFixed(1) + '%',
+      })),
+      byAssignee: assigneeStats.map((stat) => ({
+        assigneeId: stat.assigneeId,
+        assigneeName:
+          assignees.find((a) => a.id === stat.assigneeId)?.name ||
+          'Desconhecido',
+        count: stat._count.assigneeId,
+        percentage:
+          ((stat._count.assigneeId / totalTickets) * 100).toFixed(1) + '%',
+      })),
+      unassigned: {
+        count: unassignedCount,
+        percentage: ((unassignedCount / totalTickets) * 100).toFixed(1) + '%',
+      },
+      overdue: {
+        count: overdueCount,
+        percentage: ((overdueCount / totalTickets) * 100).toFixed(1) + '%',
+      },
+      dueSoon: {
+        count: dueSoonCount,
+        percentage: ((dueSoonCount / totalTickets) * 100).toFixed(1) + '%',
+      },
+      averageResolutionTime: {
+        milliseconds: avgResolutionTime,
+        hours: Math.round((avgResolutionTime / (1000 * 60 * 60)) * 10) / 10,
+        days: Math.round((avgResolutionTime / (1000 * 60 * 60 * 24)) * 10) / 10,
+      },
     };
   }
 
